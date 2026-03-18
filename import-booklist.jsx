@@ -133,6 +133,17 @@ function loadConfig(file) {
     if (config.insertMode              === undefined) { config.insertMode              = "selectedFrame"; }
     if (config.emptyLineBetweenRecords === undefined) { config.emptyLineBetweenRecords = false; }
 
+    // Normalize dividers: plain strings become { text, style: null }
+    // Objects with { "text", "style" } are kept as-is (style may be omitted/null)
+    for (var d = 0; d < config.dividers.length; d++) {
+        var entry = config.dividers[d];
+        if (typeof entry === "string") {
+            config.dividers[d] = { text: entry, style: null };
+        } else {
+            if (typeof entry.style === "undefined") { entry.style = null; }
+        }
+    }
+
     return config;
 }
 
@@ -243,8 +254,13 @@ function buildHeaderMap(headerRow, fields) {
  * All other field values get type "field".
  *
  * Divider algorithm:
- *   For each present field after the first, use dividers[field.originalIndex - 1].
- *   Absent fields suppress their own dividers without leaving gaps.
+ *   For each present field after the first, scan the dividers between the previous
+ *   present field and this one. If a line-break divider (\n or \r) is found in that
+ *   gap, use it — preserving the line break even when the field directly after the
+ *   \n is absent. Otherwise fall back to the divider immediately left of this field.
+ *
+ *   This prevents a trailing divider at the end of a line: when the field after a
+ *   \n is absent, the \n is still used rather than the | of the next present field.
  */
 function buildSegments(row, headerMap, fields, dividers) {
     var present = [];
@@ -273,12 +289,29 @@ function buildSegments(row, headerMap, fields, dividers) {
     });
 
     for (var p = 1; p < present.length; p++) {
-        var dividerIndex = present[p].index - 1;
-        segments.push({ text: dividers[dividerIndex], type: "divider" });
-        segments.push({ text: present[p].value,       type: "field"   });
+        var div = selectDivider(dividers, present[p - 1].index, present[p].index);
+        segments.push({ text: div.text, type: "divider", dividerStyle: div.style });
+        segments.push({ text: present[p].value, type: "field" });
     }
 
     return segments;
+}
+
+/**
+ * Pick the divider to insert between two consecutive present fields.
+ *
+ * Scans all dividers in the gap [prevIndex .. currIndex - 1].
+ * If a line-break divider (\n or \r) is found, it is returned so that the
+ * line break is preserved even when the field directly to its right is absent.
+ * Otherwise returns dividers[currIndex - 1] (the standard right-hand rule).
+ */
+function selectDivider(dividers, prevIndex, currIndex) {
+    for (var d = prevIndex; d < currIndex; d++) {
+        if (dividers[d].text === "\n" || dividers[d].text === "\r") {
+            return dividers[d];
+        }
+    }
+    return dividers[currIndex - 1];
 }
 
 
@@ -296,17 +329,28 @@ function insertIntoDocument(recordSegments, config) {
     // Resolve paragraph style
     var paraStyle = resolveParaStyle(doc, config.paragraphStyle);
 
+    // [None] character style — used to remove any applied character style
+    // on segments that should carry no explicit styling
+    var noneCharStyle = doc.characterStyles[0];
+
     // Resolve optional character styles
     var charStyleTitle   = null;
+    var charStyleField   = null;
     var charStyleDivider = null;
     if (config.characterStyles) {
         if (config.characterStyles.title) {
             charStyleTitle   = resolveCharStyle(doc, config.characterStyles.title);
         }
+        if (config.characterStyles.field) {
+            charStyleField   = resolveCharStyle(doc, config.characterStyles.field);
+        }
         if (config.characterStyles.divider) {
             charStyleDivider = resolveCharStyle(doc, config.characterStyles.divider);
         }
     }
+
+    // Cache for per-divider character styles (resolved lazily, once per style name)
+    var dividerStyleCache = {};
 
     // Get target text frame
     var frame = getTargetFrame(doc, config.insertMode);
@@ -348,14 +392,36 @@ function insertIntoDocument(recordSegments, config) {
 
             if (rangeLen > 0) {
                 var charStyle = null;
-                if      (seg.type === "title"   && charStyleTitle)   { charStyle = charStyleTitle;   }
-                else if (seg.type === "divider" && charStyleDivider) { charStyle = charStyleDivider; }
+                if (seg.type === "title" && charStyleTitle) {
+                    charStyle = charStyleTitle;
+                } else if (seg.type === "field" && charStyleField) {
+                    charStyle = charStyleField;
+                } else if (seg.type === "divider") {
+                    if (seg.dividerStyle) {
+                        // Resolve per-divider style lazily; cache to avoid repeated lookups
+                        if (dividerStyleCache[seg.dividerStyle] === undefined) {
+                            dividerStyleCache[seg.dividerStyle] = resolveCharStyle(doc, seg.dividerStyle);
+                        }
+                        charStyle = dividerStyleCache[seg.dividerStyle] || charStyleDivider;
+                    } else {
+                        charStyle = charStyleDivider;
+                    }
+                }
+
+                var range = story.characters.itemByRange(
+                    story.characters[charsBefore],
+                    story.characters[charsAfter - 1]
+                );
 
                 if (charStyle) {
-                    story.characters
-                         .itemByRange(story.characters[charsBefore],
-                                      story.characters[charsAfter - 1])
-                         .applyCharacterStyle(charStyle);
+                    // Apply the explicit character style (title bold, divider colour, field, etc.)
+                    range.applyCharacterStyle(charStyle);
+                } else {
+                    // No explicit style: clear both applied character styles AND any locally
+                    // inherited formatting (e.g. bold inherited from a preceding title).
+                    // applyCharacterStyle([None]) alone does not remove local overrides.
+                    range.applyCharacterStyle(noneCharStyle);
+                    range.clearOverrides(OverrideType.CHARACTER_ONLY);
                 }
             }
         }
@@ -371,15 +437,119 @@ function insertIntoDocument(recordSegments, config) {
     if (paraStyle) {
         var totalParagraphs = story.paragraphs.length;
         for (var p = paragraphsBefore; p < totalParagraphs; p++) {
-            story.paragraphs[p].applyParagraphStyle(paraStyle, true);
+            story.paragraphs[p].applyParagraphStyle(paraStyle, false);
         }
     }
+
+    // Hide dividers that land at the start or end of a visual line
+    hideLineBoundaryDividers(frame, config, doc);
 
     alert(
         "Done.\n" +
         recordSegments.length + " book record" +
         (recordSegments.length === 1 ? "" : "s") + " inserted."
     );
+}
+
+/**
+ * After insertion, scan every visual line in the text frame.
+ * Any divider string that starts or ends a line is made invisible
+ * by setting its fill colour to [Paper].
+ *
+ * The characters remain in place — no text reflows — only the colour
+ * changes, so the spacing around the hidden divider is preserved.
+ *
+ * Note: if the text frame is later resized, run the script again
+ * (after clearing the frame) so the line boundaries are re-evaluated.
+ */
+function hideLineBoundaryDividers(frame, config, doc) {
+    // Collect unique non-linebreak divider strings, sorted longest-first
+    // so that longer patterns are matched before shorter ones
+    var divTexts = [];
+    for (var d = 0; d < config.dividers.length; d++) {
+        var t = config.dividers[d].text;
+        if (t === "\n" || t === "\r" || t.length === 0) { continue; }
+        var found = false;
+        for (var x = 0; x < divTexts.length; x++) {
+            if (divTexts[x] === t) { found = true; break; }
+        }
+        if (!found) { divTexts.push(t); }
+    }
+    divTexts.sort(function (a, b) { return b.length - a.length; });
+
+    if (divTexts.length === 0) { return; }
+
+    var paperSwatch = doc.swatches.itemByName("[Paper]");
+    if (!paperSwatch || !paperSwatch.isValid) { return; }
+
+    var story = frame.parentStory;
+
+    // Force InDesign to finish composing the text before reading line positions
+    app.redraw();
+
+    // Safety check — frame must still be valid after redraw
+    if (!frame.isValid) { return; }
+
+    // Gather visual lines — try frame.lines first (lines visible in this frame),
+    // fall back to story.lines if frame.lines is empty or inaccessible
+    var lines;
+    try {
+        lines = frame.lines;
+        if (!lines || lines.length === 0) {
+            lines = story.lines;
+        }
+    } catch (e) {
+        try { lines = story.lines; } catch (e2) { return; }
+    }
+
+    if (!lines || lines.length === 0) { return; }
+
+    // First pass: collect character ranges to hide as absolute story indices.
+    // We do this before applying any colour changes to avoid layout invalidation
+    // during the scan.
+    var rangesToHide = [];
+
+    for (var i = 0; i < lines.length; i++) {
+        var line     = lines[i];
+        if (line.characters.length === 0) { continue; }
+
+        var lineText      = line.contents;
+        var lineStartIdx  = line.characters[0].index;  // absolute story position
+
+        // Trim trailing paragraph/line-end characters for end-of-line matching
+        var trimmed = lineText.replace(/[\r\n\u0003\u000B]$/, "");
+
+        // Check whether the line STARTS with a divider
+        for (var d = 0; d < divTexts.length; d++) {
+            var div = divTexts[d];
+            if (lineText.indexOf(div) === 0) {
+                rangesToHide.push({ start: lineStartIdx, end: lineStartIdx + div.length - 1 });
+                break;  // only one divider can start the line
+            }
+        }
+
+        // Check whether the line ENDS with a divider
+        for (var d = 0; d < divTexts.length; d++) {
+            var div = divTexts[d];
+            if (trimmed.length >= div.length) {
+                var pos = trimmed.length - div.length;
+                if (trimmed.lastIndexOf(div) === pos) {
+                    rangesToHide.push({ start: lineStartIdx + pos, end: lineStartIdx + pos + div.length - 1 });
+                    break;  // only one divider can end the line
+                }
+            }
+        }
+    }
+
+    // Second pass: apply [Paper] colour to the collected ranges
+    for (var r = 0; r < rangesToHide.length; r++) {
+        try {
+            story.characters
+                 .itemByRange(story.characters[rangesToHide[r].start],
+                              story.characters[rangesToHide[r].end])
+                 .fillColor = paperSwatch;
+        } catch (e) { /* skip ranges that have become invalid */ }
+    }
 }
 
 function resolveParaStyle(doc, styleName) {

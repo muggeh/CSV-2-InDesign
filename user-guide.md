@@ -243,18 +243,29 @@ dividers: [       d0,       d1,      d2,          d3 ...  ]
 
 Divider `d0` sits between Title and Author, `d1` between Author and ISNI, and so on.
 
+Each entry can be either a **plain string** or an **object** with a `"text"` and optional `"style"` property:
+
 ```json
 "dividers": [
     "  |  ",
     " ",
     ". ",
-    ", ",
+    { "text": " - ", "style": "Boeklijst divider B" },
     "  |  ",
     ", ",
     ". ",
     ". ",
     ", "
 ]
+```
+
+Plain strings use the global `"characterStyles": { "divider": "..." }` style (if set). An object with `"style"` overrides that with a specific character style for that one divider position. Both formats can be freely mixed in the same array.
+
+If you want a divider to have no character style at all — even when a global `"divider"` style is set — omit the `"style"` key or set it to `null`:
+
+```json
+{ "text": "  |  " }
+{ "text": "  |  ", "style": null }
 ```
 
 #### Divider suppression when a field is absent
@@ -294,11 +305,34 @@ A divider like `") "` would fail when ISNI is absent: `Author) Publisher` ✗. T
 | Key | Description |
 |---|---|
 | `title` | Character style applied to the title (the first field in the `fields` array). |
-| `divider` | Character style applied to every divider string. |
+| `divider` | Default character style applied to every divider string that has no per-divider style. |
 
 Both keys are optional. Remove any key you do not want applied. Remove the entire `"characterStyles"` block if you want no character-level formatting.
 
-The named styles must exist in the InDesign document before the script runs. If a style is not found, the script shows a warning and continues without applying that style.
+#### Per-divider styles
+
+Individual dividers can override the global `"divider"` style by using the object format in the `"dividers"` array (see section 6.3). This allows different dividers to have different colours or other formatting:
+
+```json
+"characterStyles": {
+    "title":   "Boeklijst titel",
+    "divider": "Boeklijst divider grijs"
+},
+
+"dividers": [
+    { "text": "  |  ", "style": "Boeklijst divider rood" },
+    " ",
+    ". ",
+    { "text": " - ",   "style": "Boeklijst divider blauw" },
+    "  |  "
+]
+```
+
+In this example, `  |  ` uses `Boeklijst divider rood`, ` - ` uses `Boeklijst divider blauw`, and the plain-string dividers (` `, `. `, and the second `  |  `) fall back to the global `Boeklijst divider grijs`.
+
+**Priority order**: per-divider `"style"` → global `"characterStyles": { "divider" }` → no style applied.
+
+All named styles must exist in the InDesign document before the script runs. If a style is not found, the script shows a warning once per missing style name and continues without applying it.
 
 ### 6.5 Insert mode
 

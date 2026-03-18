@@ -6,31 +6,32 @@
 
   "characterStyles": {
     "title":   "Boeklijst titel",
-    "divider": "Boeklijst divider"
+    "field":   "Boeklijst tekst",
+    "divider": "Boeklijst divider A"
   },
 
   "fields": [
     { "key": "title",              "label": "Title" },
     { "key": "author",             "label": "Author" },
-    { "key": "isni",               "label": "ISNI",              "prefix": "(", "suffix": ")" },
+    { "key": "isni",               "label": "ISNI",              "prefix": "ISNI: ", "suffix": "" },
     { "key": "publisher",          "label": "Publisher" },
     { "key": "publishingLocation", "label": "Publishing location" },
     { "key": "translator",         "label": "Translator" },
     { "key": "translatedBy",       "label": "Translated by" },
-    { "key": "isbn",               "label": "ISBN" },
+    { "key": "isbn",               "label": "ISBN",              "prefix": "ISBN: ", "suffix": "" },
     { "key": "form",               "label": "Form" },
     { "key": "copyright",          "label": "Copyright and year" }
   ],
 
   "dividers": [
-    "  |  ",
-    " ",
-    ". ",
-    ", ",
-    "  |  ",
-    ", ",
-    ". ",
-    ". ",
-    ", "
+    "\n",
+    { "text": "  |  ", "style": "Boeklijst divider A" },
+    { "text": "  |  ", "style": "Boeklijst divider A" },
+    { "text": "  |  ", "style": "Boeklijst divider A" },
+    { "text": " - ",   "style": "Boeklijst divider B" },
+    { "text": "  |  ", "style": "Boeklijst divider A" },
+    { "text": "  |  ", "style": "Boeklijst divider A" },
+    { "text": "  |  ", "style": "Boeklijst divider A" },
+    { "text": "  |  ", "style": "Boeklijst divider A" }
   ]
 }
