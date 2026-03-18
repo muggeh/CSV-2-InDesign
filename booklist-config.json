@@ -1,0 +1,36 @@
+{
+  "csvDelimiter": ",",
+  "paragraphStyle": "Boeklijst item",
+  "insertMode": "selectedFrame",
+  "emptyLineBetweenRecords": true,
+
+  "characterStyles": {
+    "title":   "Boeklijst titel",
+    "divider": "Boeklijst divider"
+  },
+
+  "fields": [
+    { "key": "title",              "label": "Title" },
+    { "key": "author",             "label": "Author" },
+    { "key": "isni",               "label": "ISNI",              "prefix": "(", "suffix": ")" },
+    { "key": "publisher",          "label": "Publisher" },
+    { "key": "publishingLocation", "label": "Publishing location" },
+    { "key": "translator",         "label": "Translator" },
+    { "key": "translatedBy",       "label": "Translated by" },
+    { "key": "isbn",               "label": "ISBN" },
+    { "key": "form",               "label": "Form" },
+    { "key": "copyright",          "label": "Copyright and year" }
+  ],
+
+  "dividers": [
+    "  |  ",
+    " ",
+    ". ",
+    ", ",
+    "  |  ",
+    ", ",
+    ". ",
+    ". ",
+    ", "
+  ]
+}
